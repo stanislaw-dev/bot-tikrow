@@ -6,7 +6,8 @@ from threading import Thread
 # --- KONFIGURACJA ---
 TELEGRAM_BOT_TOKEN = '8603328307:AAGCdHPSlh-a39UzYiQTKwE4UTMUxACBTsw'
 TELEGRAM_CHAT_ID = '6327998362'
-TIKROW_API_URL = 'https://commissions.tikrow.com/list?page=1&range=0&state=available&newList=true&perPage=10'
+# ZMIANA: Zwiększony limit wyników na stronę z 10 na 100
+TIKROW_API_URL = 'https://commissions.tikrow.com/list?page=1&range=0&state=available&newList=true&perPage=100'
 
 HEADERS = {
     'accept': 'application/json, text/plain, */*',
@@ -51,19 +52,27 @@ def check_jobs():
             return
 
         jobs = response.json()
-        for job in jobs.get('data', []):
+        data = jobs.get('data', [])
+        
+        # LOGOWANIE: Wyświetla w konsoli serwera ile faktycznie widzi zleceń
+        print(f"[{time.strftime('%H:%M:%S')}] Pobrałem {len(data)} dostępnych zleceń w Polsce.")
+        
+        for job in data:
             job_id = job.get('id')
-            city = job.get('city')
+            city = job.get('city', '')
 
-            if city == 'Szczecin' and job_id not in seen_jobs:
-                seen_jobs.add(job_id)
-                company = job.get('company_name', 'Nieznana firma')
-                rate = job.get('rate', 'Brak danych')
-                msg = f"🚨 *Nowe zlecenie w Szczecinie!*\nFirma: {company}\nStawka: {rate} PLN"
-                send_telegram_message(msg)
+            # ZMIANA: Miękki filtr - odporny na literówki, wielkość liter i spacje
+            if city and 'szczecin' in city.lower():
+                if job_id not in seen_jobs:
+                    seen_jobs.add(job_id)
+                    company = job.get('company_name', 'Nieznana firma')
+                    rate = job.get('rate', 'Brak danych')
+                    msg = f"🚨 *Nowe zlecenie w Szczecinie!*\nFirma: {company}\nStawka: {rate} PLN"
+                    send_telegram_message(msg)
+                    print(f"Wysłano powiadomienie: {company}")
 
     except Exception as e:
-        print(f"Błąd: {e}")
+        print(f"Błąd skryptu: {e}")
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
