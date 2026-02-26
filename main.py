@@ -1,5 +1,6 @@
 import requests
 import time
+import random
 from flask import Flask
 from threading import Thread
 
@@ -8,7 +9,7 @@ TELEGRAM_BOT_TOKEN = '8603328307:AAGCdHPSlh-a39UzYiQTKwE4UTMUxACBTsw'
 TELEGRAM_CHAT_ID = '6327998362'
 TIKROW_API_URL = 'https://commissions.tikrow.com/list?page=1&range=0&state=available&newList=true&perPage=100'
 
-# Lista Twoich wybranych adresów (zapisane małymi literami i uproszczone dla bezpieczeństwa przed literówkami)
+# Lista Twoich wybranych adresów
 TARGET_ADDRESSES = [
     "walecznych 64",
     "goleniowska 87",
@@ -82,10 +83,7 @@ def check_jobs():
             city = job.get('customer_city', '')
             address = job.get('customer_address', '')
 
-            # 1. Sprawdzamy czy to Szczecin
             if city and 'szczecin' in str(city).lower():
-                
-                # 2. Sprawdzamy czy adres zgadza się z naszą listą
                 address_lower = str(address).lower()
                 is_interesting = any(target in address_lower for target in TARGET_ADDRESSES)
                 
@@ -97,7 +95,6 @@ def check_jobs():
                         position = job.get('position', 'Praca')
                         rate_total = job.get('rate_total', 'Brak danych')
                         
-                        # Generowanie klikalnego linku
                         api_link = job.get('_links', {}).get('self', {}).get('href', '')
                         short_id = api_link.split('/')[-1] if api_link else job_id
                         job_url = f"https://partner.tikrow.com/commissions/{short_id}"
@@ -112,7 +109,9 @@ def check_jobs():
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota (wersja z filtrem adresów i linkiem)...", flush=True)
+print("Uruchamiam bota (wersja z asymetrycznym czasem odświeżania i weryfikacją logów)...", flush=True)
 while True:
     check_jobs()
-    time.sleep(15)
+    wait_time = random.randint(15, 30)
+    print(f"Czekam {wait_time} sekund do następnego sprawdzenia...", flush=True)
+    time.sleep(wait_time)
