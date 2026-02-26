@@ -11,7 +11,7 @@ TELEGRAM_BOT_TOKEN = '8603328307:AAGCdHPSlh-a39UzYiQTKwE4UTMUxACBTsw'
 TELEGRAM_CHAT_ID = '6327998362'
 TIKROW_API_URL = 'https://commissions.tikrow.com/list?page=1&range=0&state=available&newList=true&perPage=100'
 
-# Lista Twoich wybranych adresów
+# Lista Twoich wybranych adresów (miękki filtr)
 TARGET_ADDRESSES = [
     "walecznych 64",
     "goleniowska 87",
@@ -37,6 +37,7 @@ HEADERS = {
 }
 
 seen_jobs = set()
+token_dead_notified = False # Bezpiecznik antyspamowy dla błędu 401
 
 # --- MODUŁ ZAPOBIEGAJĄCY USYPIANIU BOTA ---
 app = Flask('')
@@ -62,23 +63,36 @@ def send_telegram_message(text):
         print(f"Błąd Telegrama: {e}", flush=True)
 
 def check_jobs():
+    global token_dead_notified
+    
     try:
         response = requests.get(TIKROW_API_URL, headers=HEADERS)
-        if response.status_code != 200:
+        
+        # ODKRYCIE MARTWEGO TOKENA
+        if response.status_code == 401:
+            if not token_dead_notified:
+                msg = "⚠️ *CRITICAL ERROR*\nTwój token Bearer stracił ważność! Bot jest teraz całkowicie ślepy.\nWejdź w przeglądarkę, skopiuj nowy token i podmień go w pliku na GitHubie."
+                send_telegram_message(msg)
+                token_dead_notified = True
+            print("Błąd 401: Token wygasł. Oczekuję na aktualizację kodu przez użytkownika.", flush=True)
+            return
+        elif response.status_code != 200:
             print(f"Błąd Tikrow: {response.status_code}", flush=True)
             return
 
+        # Jeśli doszliśmy tutaj, token żyje. Resetujemy bezpiecznik.
+        token_dead_notified = False
+        
         jobs = response.json()
         
         try:
             data = jobs['_embedded']['commissions']
         except KeyError:
-            print("Ostrzeżenie: Nie znaleziono '_embedded' lub 'commissions' w danych.", flush=True)
+            print("Ostrzeżenie: Nie znaleziono '_embedded' lub 'commissions' w danych. Tikrow mógł zmienić API.", flush=True)
             return
             
         available_jobs = [job for job in data if job.get('taken') is False]
         
-        # Pobieranie czasu polskiego tylko do logów wyświetlanych w Render
         warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw")).strftime('%H:%M:%S')
         print(f"[{warsaw_time}] Pobrałem {len(available_jobs)} wolnych zleceń w Polsce.", flush=True)
         
@@ -113,20 +127,17 @@ def check_jobs():
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota (wersja pancerna: Jitter, Filtry, Przerwa Nocna)...", flush=True)
+print("Uruchamiam bota (Wersja Ostateczna: Alarm wygaśnięcia, Jitter, Filtry, Przerwa Nocna)...", flush=True)
 
 while True:
-    # Pobieramy aktualny czas w Polsce
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw"))
     current_hour = warsaw_time.hour
 
-    # Jeśli jest między północą (0) a 5:59 rano
     if 0 <= current_hour < 6:
         print(f"[{warsaw_time.strftime('%H:%M:%S')}] Przerwa nocna. Bot idzie spać. Następne sprawdzenie o 06:00.", flush=True)
-        time.sleep(300) # Śpij przez 5 minut, po czym znowu sprawdź tylko godzinę
-        continue # Pomija sprawdzanie zleceń i wraca na początek pętli
+        time.sleep(300)
+        continue
 
-    # Jeśli nie ma nocy, wykonaj normalne sprawdzanie
     check_jobs()
     wait_time = random.randint(15, 30)
     print(f"Czekam {wait_time} sekund do następnego sprawdzenia...", flush=True)
