@@ -6,7 +6,6 @@ from threading import Thread
 # --- KONFIGURACJA ---
 TELEGRAM_BOT_TOKEN = '8603328307:AAGCdHPSlh-a39UzYiQTKwE4UTMUxACBTsw'
 TELEGRAM_CHAT_ID = '6327998362'
-# ZMIANA: Zwiększony limit wyników na stronę z 10 na 100
 TIKROW_API_URL = 'https://commissions.tikrow.com/list?page=1&range=0&state=available&newList=true&perPage=100'
 
 HEADERS = {
@@ -42,41 +41,50 @@ def send_telegram_message(text):
     try:
         requests.post(url, json=payload)
     except Exception as e:
-        print(f"Błąd Telegrama: {e}")
+        print(f"Błąd Telegrama: {e}", flush=True)
 
 def check_jobs():
     try:
         response = requests.get(TIKROW_API_URL, headers=HEADERS)
         if response.status_code != 200:
-            print(f"Błąd Tikrow: {response.status_code}")
+            print(f"Błąd Tikrow: {response.status_code}", flush=True)
             return
 
         jobs = response.json()
-        data = jobs.get('data', [])
         
-        # LOGOWANIE: Wyświetla w konsoli serwera ile faktycznie widzi zleceń
-        print(f"[{time.strftime('%H:%M:%S')}] Pobrałem {len(data)} dostępnych zleceń w Polsce.")
+        # Bezpieczne pobranie listy zleceń
+        if isinstance(jobs, list):
+            data = jobs
+        else:
+            data = jobs.get('data', [])
+        
+        # LOGOWANIE: Wymuszenie wyświetlenia w konsoli Render
+        print(f"[{time.strftime('%H:%M:%S')}] Pobrałem {len(data)} dostępnych zleceń w Polsce.", flush=True)
+        
+        # DIAGNOSTYKA: Wypisanie surowej struktury pierwszego zlecenia, żebyśmy zobaczyli z czym walczymy
+        if len(data) > 0 and not hasattr(check_jobs, 'debug_printed'):
+            print(f"STRUKTURA ZLECENIA: {data[0]}", flush=True)
+            check_jobs.debug_printed = True
         
         for job in data:
             job_id = job.get('id')
             city = job.get('city', '')
 
-            # ZMIANA: Miękki filtr - odporny na literówki, wielkość liter i spacje
-            if city and 'szczecin' in city.lower():
+            if city and 'szczecin' in str(city).lower():
                 if job_id not in seen_jobs:
                     seen_jobs.add(job_id)
                     company = job.get('company_name', 'Nieznana firma')
                     rate = job.get('rate', 'Brak danych')
                     msg = f"🚨 *Nowe zlecenie w Szczecinie!*\nFirma: {company}\nStawka: {rate} PLN"
                     send_telegram_message(msg)
-                    print(f"Wysłano powiadomienie: {company}")
+                    print(f"Wysłano powiadomienie: {company}", flush=True)
 
     except Exception as e:
-        print(f"Błąd skryptu: {e}")
+        print(f"Błąd skryptu: {e}", flush=True)
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota w chmurze...")
+print("Uruchamiam bota w chmurze...", flush=True)
 while True:
     check_jobs()
     time.sleep(15)
