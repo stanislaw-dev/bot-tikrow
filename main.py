@@ -8,6 +8,21 @@ TELEGRAM_BOT_TOKEN = '8603328307:AAGCdHPSlh-a39UzYiQTKwE4UTMUxACBTsw'
 TELEGRAM_CHAT_ID = '6327998362'
 TIKROW_API_URL = 'https://commissions.tikrow.com/list?page=1&range=0&state=available&newList=true&perPage=100'
 
+# Lista Twoich wybranych adresów (zapisane małymi literami i uproszczone dla bezpieczeństwa przed literówkami)
+TARGET_ADDRESSES = [
+    "walecznych 64",
+    "goleniowska 87",
+    "botaniczna 29",
+    "struga 18",
+    "leszczynowa 23",
+    "komfortowa 10",
+    "pomarańczowa 9",
+    "rydla 93",
+    "26 kwietnia 91",
+    "narutowicza 11",
+    "piastów 22" 
+]
+
 HEADERS = {
     'accept': 'application/json, text/plain, */*',
     'authorization': 'Bearer 13ae865387079b51ef932e8aff5396bcaa61dd75',
@@ -52,40 +67,52 @@ def check_jobs():
 
         jobs = response.json()
         
-        # Właściwe wyciąganie danych z nowej struktury JSON
         try:
             data = jobs['_embedded']['commissions']
         except KeyError:
             print("Ostrzeżenie: Nie znaleziono '_embedded' lub 'commissions' w danych.", flush=True)
             return
             
-        # Filtrujemy listę, zostawiając TYLKO te zlecenia, które nie są zajęte (taken: False)
         available_jobs = [job for job in data if job.get('taken') is False]
         
-        print(f"[{time.strftime('%H:%M:%S')}] Pobrałem {len(available_jobs)} wolnych zleceń (z {len(data)} wszystkich).", flush=True)
+        print(f"[{time.strftime('%H:%M:%S')}] Pobrałem {len(available_jobs)} wolnych zleceń w Polsce.", flush=True)
         
         for job in available_jobs:
             job_id = job.get('id')
-            city = job.get('customer_city', '') # Nowy klucz miasta
+            city = job.get('customer_city', '')
+            address = job.get('customer_address', '')
 
+            # 1. Sprawdzamy czy to Szczecin
             if city and 'szczecin' in str(city).lower():
-                if job_id not in seen_jobs:
-                    seen_jobs.add(job_id)
-                    
-                    company = job.get('customer', 'Nieznana firma')
-                    position = job.get('position', 'Praca')
-                    rate_total = job.get('rate_total', 'Brak danych')
-                    
-                    msg = f"🚨 *Nowe zlecenie w Szczecinie!*\nStanowisko: {position}\nFirma: {company}\nZarobek: {rate_total} PLN"
-                    send_telegram_message(msg)
-                    print(f"Wysłano powiadomienie: {company} w Szczecinie", flush=True)
+                
+                # 2. Sprawdzamy czy adres zgadza się z naszą listą
+                address_lower = str(address).lower()
+                is_interesting = any(target in address_lower for target in TARGET_ADDRESSES)
+                
+                if is_interesting:
+                    if job_id not in seen_jobs:
+                        seen_jobs.add(job_id)
+                        
+                        company = job.get('customer', 'Nieznana firma')
+                        position = job.get('position', 'Praca')
+                        rate_total = job.get('rate_total', 'Brak danych')
+                        
+                        # Generowanie klikalnego linku
+                        api_link = job.get('_links', {}).get('self', {}).get('href', '')
+                        short_id = api_link.split('/')[-1] if api_link else job_id
+                        job_url = f"https://partner.tikrow.com/commissions/{short_id}"
+                        
+                        msg = f"🚨 *Nowe zlecenie w Szczecinie!*\nStanowisko: {position}\nFirma: {company}\nAdres: {address}\nZarobek: {rate_total} PLN\n\n🔗 [Kliknij tutaj, aby otworzyć zlecenie]({job_url})"
+                        
+                        send_telegram_message(msg)
+                        print(f"Wysłano powiadomienie: {company} - {address}", flush=True)
 
     except Exception as e:
         print(f"Błąd skryptu: {e}", flush=True)
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam zaktualizowanego bota w chmurze...", flush=True)
+print("Uruchamiam bota (wersja z filtrem adresów i linkiem)...", flush=True)
 while True:
     check_jobs()
     time.sleep(15)
