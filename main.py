@@ -1,6 +1,8 @@
 import requests
 import time
 import random
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from flask import Flask
 from threading import Thread
 
@@ -76,7 +78,9 @@ def check_jobs():
             
         available_jobs = [job for job in data if job.get('taken') is False]
         
-        print(f"[{time.strftime('%H:%M:%S')}] Pobrałem {len(available_jobs)} wolnych zleceń w Polsce.", flush=True)
+        # Pobieranie czasu polskiego tylko do logów wyświetlanych w Render
+        warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw")).strftime('%H:%M:%S')
+        print(f"[{warsaw_time}] Pobrałem {len(available_jobs)} wolnych zleceń w Polsce.", flush=True)
         
         for job in available_jobs:
             job_id = job.get('id')
@@ -109,8 +113,20 @@ def check_jobs():
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota (wersja z asymetrycznym czasem odświeżania i weryfikacją logów)...", flush=True)
+print("Uruchamiam bota (wersja pancerna: Jitter, Filtry, Przerwa Nocna)...", flush=True)
+
 while True:
+    # Pobieramy aktualny czas w Polsce
+    warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw"))
+    current_hour = warsaw_time.hour
+
+    # Jeśli jest między północą (0) a 5:59 rano
+    if 0 <= current_hour < 6:
+        print(f"[{warsaw_time.strftime('%H:%M:%S')}] Przerwa nocna. Bot idzie spać. Następne sprawdzenie o 06:00.", flush=True)
+        time.sleep(300) # Śpij przez 5 minut, po czym znowu sprawdź tylko godzinę
+        continue # Pomija sprawdzanie zleceń i wraca na początek pętli
+
+    # Jeśli nie ma nocy, wykonaj normalne sprawdzanie
     check_jobs()
     wait_time = random.randint(15, 30)
     print(f"Czekam {wait_time} sekund do następnego sprawdzenia...", flush=True)
