@@ -52,19 +52,17 @@ def check_jobs():
 
         jobs = response.json()
         
-        # Bezpieczne pobranie listy zleceń
+        # ODKRYWAMY KARTY: Drukujemy pełną, surową odpowiedź serwera tylko jeden raz
+        if not hasattr(check_jobs, 'raw_printed'):
+            print(f"SUROWA ODPOWIEDŹ TIKROW: {jobs}", flush=True)
+            check_jobs.raw_printed = True
+
         if isinstance(jobs, list):
             data = jobs
         else:
             data = jobs.get('data', [])
         
-        # LOGOWANIE: Wymuszenie wyświetlenia w konsoli Render
         print(f"[{time.strftime('%H:%M:%S')}] Pobrałem {len(data)} dostępnych zleceń w Polsce.", flush=True)
-        
-        # DIAGNOSTYKA: Wypisanie surowej struktury pierwszego zlecenia, żebyśmy zobaczyli z czym walczymy
-        if len(data) > 0 and not hasattr(check_jobs, 'debug_printed'):
-            print(f"STRUKTURA ZLECENIA: {data[0]}", flush=True)
-            check_jobs.debug_printed = True
         
         for job in data:
             job_id = job.get('id')
