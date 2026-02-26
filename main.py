@@ -113,9 +113,8 @@ def check_jobs():
                         position = job.get('position', 'Praca')
                         rate_total = job.get('rate_total', 'Brak danych')
                         
-                        api_link = job.get('_links', {}).get('self', {}).get('href', '')
-                        short_id = api_link.split('/')[-1] if api_link else job_id
-                        job_url = f"https://partner.tikrow.com/commissions/{short_id}"
+                        # ZMIANA: Prawidłowy link na podstawie faktycznego routingu frontendowego Tikrow
+                        job_url = f"https://partner.tikrow.com/user-commissions/{job_id}/details"
                         
                         msg = f"🚨 *Nowe zlecenie w Szczecinie!*\nStanowisko: {position}\nFirma: {company}\nAdres: {address}\nZarobek: {rate_total} PLN\n\n🔗 [Kliknij tutaj, aby otworzyć zlecenie]({job_url})"
                         
@@ -127,7 +126,7 @@ def check_jobs():
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota (Wersja Ostateczna: Alarm wygaśnięcia, Jitter, Filtry, Przerwa Nocna)...", flush=True)
+print("Uruchamiam bota (Poprawione linki frontendowe)...", flush=True)
 
 while True:
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw"))
