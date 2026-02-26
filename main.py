@@ -52,37 +52,40 @@ def check_jobs():
 
         jobs = response.json()
         
-        # ODKRYWAMY KARTY: Drukujemy pełną, surową odpowiedź serwera tylko jeden raz
-        if not hasattr(check_jobs, 'raw_printed'):
-            print(f"SUROWA ODPOWIEDŹ TIKROW: {jobs}", flush=True)
-            check_jobs.raw_printed = True
-
-        if isinstance(jobs, list):
-            data = jobs
-        else:
-            data = jobs.get('data', [])
+        # Właściwe wyciąganie danych z nowej struktury JSON
+        try:
+            data = jobs['_embedded']['commissions']
+        except KeyError:
+            print("Ostrzeżenie: Nie znaleziono '_embedded' lub 'commissions' w danych.", flush=True)
+            return
+            
+        # Filtrujemy listę, zostawiając TYLKO te zlecenia, które nie są zajęte (taken: False)
+        available_jobs = [job for job in data if job.get('taken') is False]
         
-        print(f"[{time.strftime('%H:%M:%S')}] Pobrałem {len(data)} dostępnych zleceń w Polsce.", flush=True)
+        print(f"[{time.strftime('%H:%M:%S')}] Pobrałem {len(available_jobs)} wolnych zleceń (z {len(data)} wszystkich).", flush=True)
         
-        for job in data:
+        for job in available_jobs:
             job_id = job.get('id')
-            city = job.get('city', '')
+            city = job.get('customer_city', '') # Nowy klucz miasta
 
             if city and 'szczecin' in str(city).lower():
                 if job_id not in seen_jobs:
                     seen_jobs.add(job_id)
-                    company = job.get('company_name', 'Nieznana firma')
-                    rate = job.get('rate', 'Brak danych')
-                    msg = f"🚨 *Nowe zlecenie w Szczecinie!*\nFirma: {company}\nStawka: {rate} PLN"
+                    
+                    company = job.get('customer', 'Nieznana firma')
+                    position = job.get('position', 'Praca')
+                    rate_total = job.get('rate_total', 'Brak danych')
+                    
+                    msg = f"🚨 *Nowe zlecenie w Szczecinie!*\nStanowisko: {position}\nFirma: {company}\nZarobek: {rate_total} PLN"
                     send_telegram_message(msg)
-                    print(f"Wysłano powiadomienie: {company}", flush=True)
+                    print(f"Wysłano powiadomienie: {company} w Szczecinie", flush=True)
 
     except Exception as e:
         print(f"Błąd skryptu: {e}", flush=True)
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota w chmurze...", flush=True)
+print("Uruchamiam zaktualizowanego bota w chmurze...", flush=True)
 while True:
     check_jobs()
     time.sleep(15)
