@@ -113,20 +113,26 @@ def check_jobs():
                         position = job.get('position', 'Praca')
                         rate_total = job.get('rate_total', 'Brak danych')
                         
-                        # ZMIANA: Prawidłowy link na podstawie faktycznego routingu frontendowego Tikrow
+                        # Konwersja daty z formatu Unix Timestamp na czytelny format ze strefą czasową dla Polski
+                        start_date_ts = job.get('start_date')
+                        if start_date_ts:
+                            job_date = datetime.fromtimestamp(start_date_ts, ZoneInfo("Europe/Warsaw")).strftime('%d.%m.%Y, godz. %H:%M')
+                        else:
+                            job_date = 'Brak danych'
+                        
                         job_url = f"https://partner.tikrow.com/user-commissions/{job_id}/details"
                         
-                        msg = f"🚨 *Nowe zlecenie w Szczecinie!*\nStanowisko: {position}\nFirma: {company}\nAdres: {address}\nZarobek: {rate_total} PLN\n\n🔗 [Kliknij tutaj, aby otworzyć zlecenie]({job_url})"
+                        msg = f"🚨 *Nowe zlecenie w Szczecinie!*\n📅 *Kiedy:* {job_date}\nStanowisko: {position}\nFirma: {company}\nAdres: {address}\nZarobek: {rate_total} PLN\n\n🔗 [Kliknij tutaj, aby otworzyć zlecenie]({job_url})"
                         
                         send_telegram_message(msg)
-                        print(f"Wysłano powiadomienie: {company} - {address}", flush=True)
+                        print(f"Wysłano powiadomienie: {company} - {address} ({job_date})", flush=True)
 
     except Exception as e:
         print(f"Błąd skryptu: {e}", flush=True)
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota (Poprawione linki frontendowe)...", flush=True)
+print("Uruchamiam bota (Dodano konwersję daty zlecenia)...", flush=True)
 
 while True:
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw"))
