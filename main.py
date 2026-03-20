@@ -10,10 +10,11 @@ from threading import Thread
 TELEGRAM_BOT_TOKEN = '8603328307:AAGCdHPSlh-a39UzYiQTKwE4UTMUxACBTsw'
 TELEGRAM_CHAT_ID = '6327998362'
 
-# ZMIANA: Usunięto 'page=1', aby móc dodawać numer strony dynamicznie w pętli
-TIKROW_BASE_URL = 'https://commissions.tikrow.com/list?range=0&state=available&newList=true&perPage=100'
+# ZMIANA: Nowy, precyzyjny link geolokalizacyjny. Zmieniłem perPage=10 na 100, 
+# żeby pobrać wszystkie zlecenia ze Szczecina jednym strzałem bez paginacji.
+TIKROW_API_URL = 'https://commissions.tikrow.com/list?page=1&range=15&state=available&newList=true&perPage=100&lat=53.379360370518434&lng=14.64955069417926'
 
-# Lista Twoich wybranych adresów (miękki filtr)
+# Lista Twoich wybranych adresów (twardy filtr)
 TARGET_ADDRESSES = [
     "walecznych 64",
     "goleniowska 87",
@@ -39,7 +40,7 @@ HEADERS = {
 }
 
 seen_jobs = set()
-token_dead_notified = False # Bezpiecznik antyspamowy dla błędu 401
+token_dead_notified = False
 
 # --- MODUŁ ZAPOBIEGAJĄCY USYPIANIU BOTA ---
 app = Flask('')
@@ -66,61 +67,46 @@ def send_telegram_message(text):
 
 def check_jobs():
     global token_dead_notified
-    all_available_now = []
     
-    # ZMIANA: Skrypt wykonuje 3 zapytania, pobierając strony 1, 2 i 3
-    for page in range(1, 4):
+    try:
+        # Pętla stron usunięta. Robimy jeden, precyzyjny strzał.
+        response = requests.get(TIKROW_API_URL, headers=HEADERS)
+        
+        if response.status_code == 401:
+            if not token_dead_notified:
+                msg = "⚠️ *CRITICAL ERROR*\nTwój token Bearer stracił ważność! Bot jest teraz całkowicie ślepy.\nWejdź w przeglądarkę, skopiuj nowy token i podmień go w pliku na GitHubie."
+                send_telegram_message(msg)
+                token_dead_notified = True
+            print("Błąd 401: Token wygasł. Oczekuję na aktualizację kodu.", flush=True)
+            return
+        elif response.status_code != 200:
+            print(f"Błąd Tikrow: {response.status_code}", flush=True)
+            return
+
+        token_dead_notified = False
+        jobs = response.json()
+        
         try:
-            url = f"{TIKROW_BASE_URL}&page={page}"
-            response = requests.get(url, headers=HEADERS)
+            data = jobs['_embedded']['commissions']
+        except KeyError:
+            print("Ostrzeżenie: Nie znaleziono '_embedded' lub 'commissions' w danych. Możliwy brak zleceń.", flush=True)
+            return
             
-            # ODKRYCIE MARTWEGO TOKENA
-            if response.status_code == 401:
-                if not token_dead_notified:
-                    msg = "⚠️ *CRITICAL ERROR*\nTwój token Bearer stracił ważność! Bot jest teraz całkowicie ślepy.\nWejdź w przeglądarkę, skopiuj nowy token i podmień go w pliku na GitHubie."
-                    send_telegram_message(msg)
-                    token_dead_notified = True
-                print("Błąd 401: Token wygasł. Oczekuję na aktualizację kodu.", flush=True)
-                return
-            elif response.status_code != 200:
-                print(f"Błąd Tikrow na stronie {page}: {response.status_code}", flush=True)
-                continue # Jeśli jedna strona padnie, próbujemy pobrać następną
+        # Odrzucamy przyjęte zlecenia
+        available_jobs = [job for job in data if job.get('taken') is False]
+        
+        warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw")).strftime('%H:%M:%S')
+        print(f"[{warsaw_time}] Pobrałem {len(available_jobs)} wolnych zleceń z obszaru Szczecin (15km).", flush=True)
+        
+        for job in available_jobs:
+            job_id = job.get('id')
+            city = job.get('customer_city', '')
+            address = job.get('customer_address', '')
 
-            # Jeśli doszliśmy tutaj, token żyje.
-            token_dead_notified = False
-            jobs = response.json()
-            
-            try:
-                data = jobs['_embedded']['commissions']
-            except KeyError:
-                print(f"Ostrzeżenie: Nie znaleziono danych na stronie {page}.", flush=True)
-                continue
-                
-            # Dodajemy tylko wolne zlecenia do wspólnego koszyka
-            available_on_page = [job for job in data if job.get('taken') is False]
-            all_available_now.extend(available_on_page)
-            
-            # Bezpiecznik: czekamy 1.5 sekundy przed pobraniem kolejnej strony
-            time.sleep(1.5)
-            
-        except Exception as e:
-            print(f"Błąd pobierania strony {page}: {e}", flush=True)
-            
-    # Po pobraniu wszystkich 3 stron analizujemy zebrane dane
-    warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw")).strftime('%H:%M:%S')
-    print(f"[{warsaw_time}] Przeskanowałem 3 strony (do 300 pozycji). Znalazłem {len(all_available_now)} wolnych zleceń w Polsce.", flush=True)
-    
-    for job in all_available_now:
-        job_id = job.get('id')
-        city = job.get('customer_city', '')
-        address = job.get('customer_address', '')
+            # Diagnostyka: Zobaczysz teraz w logach tylko i wyłącznie zlecenia z tego obszaru 15km
+            print(f"   -> Radar wykrył: {city}, {address}", flush=True)
 
-        if city and 'szczecin' in str(city).lower():
             address_lower = str(address).lower()
-            
-            # DIAGNOSTYKA: Będziesz widział w logach, co bot sprawdza
-            print(f"   -> Widzę w logach Szczecin: {address}", flush=True)
-            
             is_interesting = any(target in address_lower for target in TARGET_ADDRESSES)
             
             if is_interesting:
@@ -131,7 +117,6 @@ def check_jobs():
                     position = job.get('position', 'Praca')
                     rate_total = job.get('rate_total', 'Brak danych')
                     
-                    # Konwersja daty z formatu Unix Timestamp na czytelny format ze strefą czasową dla Polski
                     start_date_ts = job.get('start_date')
                     if start_date_ts:
                         job_date = datetime.fromtimestamp(start_date_ts, ZoneInfo("Europe/Warsaw")).strftime('%d.%m.%Y, godz. %H:%M')
@@ -140,14 +125,17 @@ def check_jobs():
                     
                     job_url = f"https://partner.tikrow.com/user-commissions/{job_id}/details"
                     
-                    msg = f"🚨 *Nowe zlecenie w Szczecinie!*\n📅 *Kiedy:* {job_date}\nStanowisko: {position}\nFirma: {company}\nAdres: {address}\nZarobek: {rate_total} PLN\n\n🔗 [Kliknij tutaj, aby otworzyć zlecenie]({job_url})"
+                    msg = f"🚨 *Nowe zlecenie!*\n📅 *Kiedy:* {job_date}\nStanowisko: {position}\nFirma: {company}\nAdres: {address}\nZarobek: {rate_total} PLN\n\n🔗 [Kliknij tutaj, aby otworzyć zlecenie]({job_url})"
                     
                     send_telegram_message(msg)
                     print(f"Wysłano powiadomienie: {company} - {address} ({job_date})", flush=True)
 
+    except Exception as e:
+        print(f"Błąd skryptu: {e}", flush=True)
+
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota (Wersja z pobieraniem 300 zleceń i pełną diagnostyką)...", flush=True)
+print("Uruchamiam bota (Zoptymalizowano do 1 zapytania wg współrzędnych i filtra 15km)...", flush=True)
 
 while True:
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw"))
@@ -159,6 +147,6 @@ while True:
         continue
 
     check_jobs()
-    wait_time = random.randint(15, 30)
+    wait_time = random.randint(10, 25)
     print(f"Czekam {wait_time} sekund do następnego sprawdzenia...", flush=True)
     time.sleep(wait_time)
