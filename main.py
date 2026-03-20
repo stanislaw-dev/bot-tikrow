@@ -10,9 +10,9 @@ from threading import Thread
 TELEGRAM_BOT_TOKEN = '8603328307:AAGCdHPSlh-a39UzYiQTKwE4UTMUxACBTsw'
 TELEGRAM_CHAT_ID = '6327998362'
 
-# ZMIANA: Nowy, precyzyjny link geolokalizacyjny. Zmieniłem perPage=10 na 100, 
-# żeby pobrać wszystkie zlecenia ze Szczecina jednym strzałem bez paginacji.
-TIKROW_API_URL = 'https://commissions.tikrow.com/list?page=1&range=15&state=available&newList=true&perPage=100&lat=53.379360370518434&lng=14.64955069417926'
+# ZMIANA: Usunięto sztywne 'page=1' oraz powrócono do 'perPage=10'. 
+# URL jest teraz bazą, do której w pętli doklejamy numer strony.
+TIKROW_BASE_URL = 'https://commissions.tikrow.com/list?range=15&state=available&newList=true&perPage=10&lat=53.379360370518434&lng=14.64955069417926'
 
 # Lista Twoich wybranych adresów (twardy filtr)
 TARGET_ADDRESSES = [
@@ -67,75 +67,83 @@ def send_telegram_message(text):
 
 def check_jobs():
     global token_dead_notified
+    all_available_now = []
     
-    try:
-        # Pętla stron usunięta. Robimy jeden, precyzyjny strzał.
-        response = requests.get(TIKROW_API_URL, headers=HEADERS)
-        
-        if response.status_code == 401:
-            if not token_dead_notified:
-                msg = "⚠️ *CRITICAL ERROR*\nTwój token Bearer stracił ważność! Bot jest teraz całkowicie ślepy.\nWejdź w przeglądarkę, skopiuj nowy token i podmień go w pliku na GitHubie."
-                send_telegram_message(msg)
-                token_dead_notified = True
-            print("Błąd 401: Token wygasł. Oczekuję na aktualizację kodu.", flush=True)
-            return
-        elif response.status_code != 200:
-            print(f"Błąd Tikrow: {response.status_code}", flush=True)
-            return
-
-        token_dead_notified = False
-        jobs = response.json()
-        
+    # ZMIANA: Pętla skanująca do 20 stron (200 zleceń), jeśli będzie taka potrzeba
+    for page in range(1, 21):
         try:
-            data = jobs['_embedded']['commissions']
-        except KeyError:
-            print("Ostrzeżenie: Nie znaleziono '_embedded' lub 'commissions' w danych. Możliwy brak zleceń.", flush=True)
-            return
+            url = f"{TIKROW_BASE_URL}&page={page}"
+            response = requests.get(url, headers=HEADERS)
             
-        # Odrzucamy przyjęte zlecenia
-        available_jobs = [job for job in data if job.get('taken') is False]
-        
-        warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw")).strftime('%H:%M:%S')
-        print(f"[{warsaw_time}] Pobrałem {len(available_jobs)} wolnych zleceń z obszaru Szczecin (15km).", flush=True)
-        
-        for job in available_jobs:
-            job_id = job.get('id')
-            city = job.get('customer_city', '')
-            address = job.get('customer_address', '')
-
-            # Diagnostyka: Zobaczysz teraz w logach tylko i wyłącznie zlecenia z tego obszaru 15km
-            print(f"   -> Radar wykrył: {city}, {address}", flush=True)
-
-            address_lower = str(address).lower()
-            is_interesting = any(target in address_lower for target in TARGET_ADDRESSES)
-            
-            if is_interesting:
-                if job_id not in seen_jobs:
-                    seen_jobs.add(job_id)
-                    
-                    company = job.get('customer', 'Nieznana firma')
-                    position = job.get('position', 'Praca')
-                    rate_total = job.get('rate_total', 'Brak danych')
-                    
-                    start_date_ts = job.get('start_date')
-                    if start_date_ts:
-                        job_date = datetime.fromtimestamp(start_date_ts, ZoneInfo("Europe/Warsaw")).strftime('%d.%m.%Y, godz. %H:%M')
-                    else:
-                        job_date = 'Brak danych'
-                    
-                    job_url = f"https://partner.tikrow.com/user-commissions/{job_id}/details"
-                    
-                    msg = f"🚨 *Nowe zlecenie!*\n📅 *Kiedy:* {job_date}\nStanowisko: {position}\nFirma: {company}\nAdres: {address}\nZarobek: {rate_total} PLN\n\n🔗 [Kliknij tutaj, aby otworzyć zlecenie]({job_url})"
-                    
+            if response.status_code == 401:
+                if not token_dead_notified:
+                    msg = "⚠️ *CRITICAL ERROR*\nTwój token Bearer stracił ważność! Bot jest teraz całkowicie ślepy.\nWejdź w przeglądarkę, skopiuj nowy token i podmień go w pliku na GitHubie."
                     send_telegram_message(msg)
-                    print(f"Wysłano powiadomienie: {company} - {address} ({job_date})", flush=True)
+                    token_dead_notified = True
+                print("Błąd 401: Token wygasł. Oczekuję na aktualizację kodu.", flush=True)
+                return
+            elif response.status_code != 200:
+                print(f"Błąd Tikrow na stronie {page}: {response.status_code}", flush=True)
+                continue
 
-    except Exception as e:
-        print(f"Błąd skryptu: {e}", flush=True)
+            token_dead_notified = False
+            jobs = response.json()
+            
+            try:
+                data = jobs['_embedded']['commissions']
+            except KeyError:
+                break # Brak klucza danych - przerywamy pętlę
+                
+            # ZMIANA: Inteligentny hamulec - przerywa pętlę, gdy lista na stronie jest już pusta
+            if not data:
+                break
+                
+            available_on_page = [job for job in data if job.get('taken') is False]
+            all_available_now.extend(available_on_page)
+            
+            # Bezpiecznik: 1 sekunda przerwy między każdą ze stron, aby nie przeciążyć API
+            time.sleep(1.0)
+            
+        except Exception as e:
+            print(f"Błąd pobierania strony {page}: {e}", flush=True)
+            
+    warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw")).strftime('%H:%M:%S')
+    print(f"[{warsaw_time}] Przeskanowałem lokalnie {len(all_available_now)} wolnych zleceń z obszaru 15 km.", flush=True)
+    
+    for job in all_available_now:
+        job_id = job.get('id')
+        city = job.get('customer_city', '')
+        address = job.get('customer_address', '')
+
+        print(f"   -> Radar wykrył: {city}, {address}", flush=True)
+
+        address_lower = str(address).lower()
+        is_interesting = any(target in address_lower for target in TARGET_ADDRESSES)
+        
+        if is_interesting:
+            if job_id not in seen_jobs:
+                seen_jobs.add(job_id)
+                
+                company = job.get('customer', 'Nieznana firma')
+                position = job.get('position', 'Praca')
+                rate_total = job.get('rate_total', 'Brak danych')
+                
+                start_date_ts = job.get('start_date')
+                if start_date_ts:
+                    job_date = datetime.fromtimestamp(start_date_ts, ZoneInfo("Europe/Warsaw")).strftime('%d.%m.%Y, godz. %H:%M')
+                else:
+                    job_date = 'Brak danych'
+                
+                job_url = f"https://partner.tikrow.com/user-commissions/{job_id}/details"
+                
+                msg = f"🚨 *Nowe zlecenie!*\n📅 *Kiedy:* {job_date}\nStanowisko: {position}\nFirma: {company}\nAdres: {address}\nZarobek: {rate_total} PLN\n\n🔗 [Kliknij tutaj, aby otworzyć zlecenie]({job_url})"
+                
+                send_telegram_message(msg)
+                print(f"Wysłano powiadomienie: {company} - {address} ({job_date})", flush=True)
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota (Zoptymalizowano do 1 zapytania wg współrzędnych i filtra 15km)...", flush=True)
+print("Uruchamiam bota (Zoptymalizowano: Dynamiczne skanowanie wielu stron, 15km radar)...", flush=True)
 
 while True:
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw"))
