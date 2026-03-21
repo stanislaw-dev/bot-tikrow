@@ -68,15 +68,15 @@ def check_jobs():
     warsaw_tz = ZoneInfo("Europe/Warsaw")
     today = datetime.now(warsaw_tz)
     
-    # ZMIANA: Zewnętrzna pętla skanująca 30 dni w przód (omija blokadę 40 zleceń)
+    # Pętla skanująca 30 dni w przód
     for day_offset in range(30):
         target_date = (today + timedelta(days=day_offset)).strftime('%Y-%m-%d')
         
         # Wewnętrzna pętla skanująca strony dla danego dnia
         for page in range(1, 21):
             try:
-                # Wstrzykujemy datę i numer strony do URL
-                url = f"{TIKROW_BASE_URL}&date={target_date}&page={page}"
+                # ZMIANA: Precyzyjne formatowanie dateFrom i dateTo z dokładnością do sekundy
+                url = f"{TIKROW_BASE_URL}&dateFrom={target_date}+00%3A00%3A00&dateTo={target_date}+23%3A59%3A59&page={page}"
                 response = requests.get(url, headers=HEADERS)
                 
                 if response.status_code == 401:
@@ -96,26 +96,27 @@ def check_jobs():
                 try:
                     data = jobs['_embedded']['commissions']
                 except KeyError:
-                    break # Brak klucza danych - przerywamy pętlę dla tego dnia
+                    break 
                     
-                # Inteligentny hamulec - przerywa pętlę stron dla danego dnia, gdy lista jest pusta
                 if not data:
                     break
                     
                 available_on_page = [job for job in data if job.get('taken') is False]
                 all_available_now.extend(available_on_page)
                 
-                # Bezpiecznik: 1 sekunda przerwy między każdą stroną (niezbędne przy tylu zapytaniach)
                 time.sleep(1.0)
                 
             except Exception as e:
                 print(f"Błąd pobierania strony {page} ({target_date}): {e}", flush=True)
-                break # Przerywamy strony w przypadku błędu i idziemy do kolejnego dnia
+                break 
+    
+    # Zabezpieczenie przed ewentualnymi duplikatami w logach z różnych stron
+    unique_jobs = {job['id']: job for job in all_available_now}.values()
             
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw")).strftime('%H:%M:%S')
-    print(f"[{warsaw_time}] Przeskanowałem lokalnie {len(all_available_now)} wolnych zleceń z obszaru 30 km (Zakres: 30 dni).", flush=True)
+    print(f"[{warsaw_time}] Przeskanowałem lokalnie {len(unique_jobs)} unikalnych, wolnych zleceń z obszaru 30 km (Zakres: 30 dni).", flush=True)
     
-    for job in all_available_now:
+    for job in unique_jobs:
         job_id = job.get('id')
         city = job.get('customer_city', '')
         address = job.get('customer_address', '')
@@ -150,21 +151,19 @@ def check_jobs():
                 send_telegram_message(msg)
                 print(f"Wysłano powiadomienie: {company} - {address} ({job_date})", flush=True)
 
-# Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota (Matryca 30-dniowa, promień 30km, skrócony interwał)...", flush=True)
+print("Uruchamiam bota (Matryca 30-dniowa precyzyjna, promień 30km)...", flush=True)
 
 while True:
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw"))
     current_hour = warsaw_time.hour
 
     if 0 <= current_hour < 6:
-        print(f"[{warsaw_time.strftime('%H:%M:%S')}] Przerwa nocna. Bot idzie spać. Następne sprawdzenie o 06:00.", flush=True)
+        print(f"[{warsaw_time.strftime('%H:%M:%S')}] Przerwa nocna.", flush=True)
         time.sleep(300)
         continue
 
     check_jobs()
-    # ZMIANA: Skrócony czas oczekiwania (3 do 6 sekund) ze względu na długi czas samego skanowania
     wait_time = random.randint(3, 6)
     print(f"Czekam {wait_time} sekund do następnego sprawdzenia...", flush=True)
     time.sleep(wait_time)
