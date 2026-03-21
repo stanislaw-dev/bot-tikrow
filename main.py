@@ -10,9 +10,8 @@ from threading import Thread
 TELEGRAM_BOT_TOKEN = '8603328307:AAGCdHPSlh-a39UzYiQTKwE4UTMUxACBTsw'
 TELEGRAM_CHAT_ID = '6327998362'
 
-# ZMIANA: Usunięto sztywne 'page=1' oraz powrócono do 'perPage=10'. 
-# URL jest teraz bazą, do której w pętli doklejamy numer strony.
-TIKROW_BASE_URL = 'https://commissions.tikrow.com/list?range=15&state=available&newList=true&perPage=10&lat=53.379360370518434&lng=14.64955069417926'
+# ZMIANA: Zwiększono range z 15 na 30, aby sprawdzić, czy Tikrow ukrywało zlecenia na obrzeżach.
+TIKROW_BASE_URL = 'https://commissions.tikrow.com/list?range=30&state=available&newList=true&perPage=10&lat=53.379360370518434&lng=14.64955069417926'
 
 # Lista Twoich wybranych adresów (twardy filtr)
 TARGET_ADDRESSES = [
@@ -69,7 +68,7 @@ def check_jobs():
     global token_dead_notified
     all_available_now = []
     
-    # ZMIANA: Pętla skanująca do 20 stron (200 zleceń), jeśli będzie taka potrzeba
+    # Pętla skanująca do 20 stron (200 zleceń), jeśli będzie taka potrzeba
     for page in range(1, 21):
         try:
             url = f"{TIKROW_BASE_URL}&page={page}"
@@ -94,21 +93,21 @@ def check_jobs():
             except KeyError:
                 break # Brak klucza danych - przerywamy pętlę
                 
-            # ZMIANA: Inteligentny hamulec - przerywa pętlę, gdy lista na stronie jest już pusta
+            # Inteligentny hamulec - przerywa pętlę, gdy lista na stronie jest już pusta
             if not data:
                 break
                 
             available_on_page = [job for job in data if job.get('taken') is False]
             all_available_now.extend(available_on_page)
             
-            # Bezpiecznik: 1 sekunda przerwy między każdą ze stron, aby nie przeciążyć API
+            # Bezpiecznik: 1 sekunda przerwy między każdą ze stron
             time.sleep(1.0)
             
         except Exception as e:
             print(f"Błąd pobierania strony {page}: {e}", flush=True)
             
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw")).strftime('%H:%M:%S')
-    print(f"[{warsaw_time}] Przeskanowałem lokalnie {len(all_available_now)} wolnych zleceń z obszaru 15 km.", flush=True)
+    print(f"[{warsaw_time}] Przeskanowałem lokalnie {len(all_available_now)} wolnych zleceń z obszaru 30 km.", flush=True)
     
     for job in all_available_now:
         job_id = job.get('id')
@@ -129,13 +128,15 @@ def check_jobs():
                 rate_total = job.get('rate_total', 'Brak danych')
                 
                 start_date_ts = job.get('start_date')
-                    if start_date_ts:
-                        dt = datetime.fromtimestamp(start_date_ts, ZoneInfo("Europe/Warsaw"))
-                        dni_tygodnia = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
-                        dzien_tygodnia = dni_tygodnia[dt.weekday()]
-                        job_date = dt.strftime(f'%d.%m.%Y ({dzien_tygodnia}), godz. %H:%M')
-                    else:
-                        job_date = 'Brak danych'
+                
+                # ZMIANA: Naprawiono błąd wcięć w tym bloku, który powodował awarię skryptu
+                if start_date_ts:
+                    dt = datetime.fromtimestamp(start_date_ts, ZoneInfo("Europe/Warsaw"))
+                    dni_tygodnia = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
+                    dzien_tygodnia = dni_tygodnia[dt.weekday()]
+                    job_date = dt.strftime(f'%d.%m.%Y ({dzien_tygodnia}), godz. %H:%M')
+                else:
+                    job_date = 'Brak danych'
                 
                 job_url = f"https://partner.tikrow.com/user-commissions/{job_id}/details"
                 
@@ -146,7 +147,7 @@ def check_jobs():
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota (Zoptymalizowano: Dynamiczne skanowanie wielu stron, 15km radar)...", flush=True)
+print("Uruchamiam bota (Test zasięgu 30km, dynamiczne skanowanie)...", flush=True)
 
 while True:
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw"))
