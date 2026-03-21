@@ -129,10 +129,13 @@ def check_jobs():
                 rate_total = job.get('rate_total', 'Brak danych')
                 
                 start_date_ts = job.get('start_date')
-                if start_date_ts:
-                    job_date = datetime.fromtimestamp(start_date_ts, ZoneInfo("Europe/Warsaw")).strftime('%d.%m.%Y, godz. %H:%M')
-                else:
-                    job_date = 'Brak danych'
+                    if start_date_ts:
+                        dt = datetime.fromtimestamp(start_date_ts, ZoneInfo("Europe/Warsaw"))
+                        dni_tygodnia = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
+                        dzien_tygodnia = dni_tygodnia[dt.weekday()]
+                        job_date = dt.strftime(f'%d.%m.%Y ({dzien_tygodnia}), godz. %H:%M')
+                    else:
+                        job_date = 'Brak danych'
                 
                 job_url = f"https://partner.tikrow.com/user-commissions/{job_id}/details"
                 
