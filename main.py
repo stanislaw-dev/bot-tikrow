@@ -1,7 +1,7 @@
 import requests
 import time
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Flask
 from threading import Thread
@@ -10,10 +10,8 @@ from threading import Thread
 TELEGRAM_BOT_TOKEN = '8603328307:AAGCdHPSlh-a39UzYiQTKwE4UTMUxACBTsw'
 TELEGRAM_CHAT_ID = '6327998362'
 
-# ZMIANA: Zwiększono range z 15 na 30, aby sprawdzić, czy Tikrow ukrywało zlecenia na obrzeżach.
 TIKROW_BASE_URL = 'https://commissions.tikrow.com/list?range=30&state=available&newList=true&perPage=10&lat=53.379360370518434&lng=14.64955069417926'
 
-# Lista Twoich wybranych adresów (twardy filtr)
 TARGET_ADDRESSES = [
     "walecznych 64",
     "goleniowska 87",
@@ -67,47 +65,55 @@ def send_telegram_message(text):
 def check_jobs():
     global token_dead_notified
     all_available_now = []
+    warsaw_tz = ZoneInfo("Europe/Warsaw")
+    today = datetime.now(warsaw_tz)
     
-    # Pętla skanująca do 20 stron (200 zleceń), jeśli będzie taka potrzeba
-    for page in range(1, 21):
-        try:
-            url = f"{TIKROW_BASE_URL}&page={page}"
-            response = requests.get(url, headers=HEADERS)
-            
-            if response.status_code == 401:
-                if not token_dead_notified:
-                    msg = "⚠️ *CRITICAL ERROR*\nTwój token Bearer stracił ważność! Bot jest teraz całkowicie ślepy.\nWejdź w przeglądarkę, skopiuj nowy token i podmień go w pliku na GitHubie."
-                    send_telegram_message(msg)
-                    token_dead_notified = True
-                print("Błąd 401: Token wygasł. Oczekuję na aktualizację kodu.", flush=True)
-                return
-            elif response.status_code != 200:
-                print(f"Błąd Tikrow na stronie {page}: {response.status_code}", flush=True)
-                continue
-
-            token_dead_notified = False
-            jobs = response.json()
-            
+    # ZMIANA: Zewnętrzna pętla skanująca 30 dni w przód (omija blokadę 40 zleceń)
+    for day_offset in range(30):
+        target_date = (today + timedelta(days=day_offset)).strftime('%Y-%m-%d')
+        
+        # Wewnętrzna pętla skanująca strony dla danego dnia
+        for page in range(1, 21):
             try:
-                data = jobs['_embedded']['commissions']
-            except KeyError:
-                break # Brak klucza danych - przerywamy pętlę
+                # Wstrzykujemy datę i numer strony do URL
+                url = f"{TIKROW_BASE_URL}&date={target_date}&page={page}"
+                response = requests.get(url, headers=HEADERS)
                 
-            # Inteligentny hamulec - przerywa pętlę, gdy lista na stronie jest już pusta
-            if not data:
-                break
+                if response.status_code == 401:
+                    if not token_dead_notified:
+                        msg = "⚠️ *CRITICAL ERROR*\nTwój token Bearer stracił ważność! Bot jest teraz całkowicie ślepy.\nWejdź w przeglądarkę, skopiuj nowy token i podmień go w pliku na GitHubie."
+                        send_telegram_message(msg)
+                        token_dead_notified = True
+                    print("Błąd 401: Token wygasł. Oczekuję na aktualizację kodu.", flush=True)
+                    return
+                elif response.status_code != 200:
+                    print(f"Błąd Tikrow na stronie {page} ({target_date}): {response.status_code}", flush=True)
+                    continue
+
+                token_dead_notified = False
+                jobs = response.json()
                 
-            available_on_page = [job for job in data if job.get('taken') is False]
-            all_available_now.extend(available_on_page)
-            
-            # Bezpiecznik: 1 sekunda przerwy między każdą ze stron
-            time.sleep(1.0)
-            
-        except Exception as e:
-            print(f"Błąd pobierania strony {page}: {e}", flush=True)
+                try:
+                    data = jobs['_embedded']['commissions']
+                except KeyError:
+                    break # Brak klucza danych - przerywamy pętlę dla tego dnia
+                    
+                # Inteligentny hamulec - przerywa pętlę stron dla danego dnia, gdy lista jest pusta
+                if not data:
+                    break
+                    
+                available_on_page = [job for job in data if job.get('taken') is False]
+                all_available_now.extend(available_on_page)
+                
+                # Bezpiecznik: 1 sekunda przerwy między każdą stroną (niezbędne przy tylu zapytaniach)
+                time.sleep(1.0)
+                
+            except Exception as e:
+                print(f"Błąd pobierania strony {page} ({target_date}): {e}", flush=True)
+                break # Przerywamy strony w przypadku błędu i idziemy do kolejnego dnia
             
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw")).strftime('%H:%M:%S')
-    print(f"[{warsaw_time}] Przeskanowałem lokalnie {len(all_available_now)} wolnych zleceń z obszaru 30 km.", flush=True)
+    print(f"[{warsaw_time}] Przeskanowałem lokalnie {len(all_available_now)} wolnych zleceń z obszaru 30 km (Zakres: 30 dni).", flush=True)
     
     for job in all_available_now:
         job_id = job.get('id')
@@ -129,7 +135,6 @@ def check_jobs():
                 
                 start_date_ts = job.get('start_date')
                 
-                # ZMIANA: Naprawiono błąd wcięć w tym bloku, który powodował awarię skryptu
                 if start_date_ts:
                     dt = datetime.fromtimestamp(start_date_ts, ZoneInfo("Europe/Warsaw"))
                     dni_tygodnia = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
@@ -147,7 +152,7 @@ def check_jobs():
 
 # Uruchomienie fałszywego serwera i głównej pętli
 keep_alive()
-print("Uruchamiam bota (Test zasięgu 30km, dynamiczne skanowanie)...", flush=True)
+print("Uruchamiam bota (Matryca 30-dniowa, promień 30km, skrócony interwał)...", flush=True)
 
 while True:
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw"))
@@ -159,6 +164,7 @@ while True:
         continue
 
     check_jobs()
-    wait_time = random.randint(10, 25)
+    # ZMIANA: Skrócony czas oczekiwania (3 do 6 sekund) ze względu na długi czas samego skanowania
+    wait_time = random.randint(3, 6)
     print(f"Czekam {wait_time} sekund do następnego sprawdzenia...", flush=True)
     time.sleep(wait_time)
