@@ -33,7 +33,7 @@ cycle_counter = 0
 
 app = Flask('')
 @app.route('/')
-def home(): return "Bot Tikrow: Tryb Wartownik 3:1 (0.6s) Aktywny!"
+def home(): return "Bot monitorujacy Tikrow dziala i ma sie dobrze!"
 
 def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive(): Thread(target=run).start()
@@ -50,75 +50,105 @@ def check_jobs():
     warsaw_tz = ZoneInfo("Europe/Warsaw")
     today = datetime.now(warsaw_tz)
     
-    # ZMIANA: Skala 3:1 (co 3 cykle pełny skan 30 dni)
+    # Skala 3:1 (co 3 cykle pełny skan 30 dni)
     if cycle_counter % 3 == 0:
         days_to_check = 30
-        mode_label = "GŁĘBOKI (30 dni)"
+        mode_label = "Zakres: 30 dni"
     else:
         days_to_check = 10
-        mode_label = "SZYBKI (10 dni)"
+        mode_label = "Zakres: 10 dni"
     
     cycle_counter += 1
-    start_time = time.time()
     
     for day_offset in range(days_to_check):
         target_date = (today + timedelta(days=day_offset)).strftime('%Y-%m-%d')
         
-        for page in range(1, 11): 
+        for page in range(1, 21): 
             try:
                 url = f"{TIKROW_BASE_URL}&dateFrom={target_date}+00%3A00%3A00&dateTo={target_date}+23%3A59%3A59&page={page}"
                 response = requests.get(url, headers=HEADERS, timeout=7)
                 
                 if response.status_code == 401:
                     if not token_dead_notified:
-                        send_telegram_message("⚠️ *TOKEN WYGASŁ!* Zmień Bearer na GitHubie.")
+                        msg = "⚠️ *CRITICAL ERROR*\nTwój token Bearer stracił ważność! Bot jest teraz całkowicie ślepy.\nWejdź w przeglądarkę, skopiuj nowy token i podmień go w pliku na GitHubie."
+                        send_telegram_message(msg)
                         token_dead_notified = True
+                    print("Błąd 401: Token wygasł. Oczekuję na aktualizację kodu.", flush=True)
                     return
+                elif response.status_code != 200:
+                    print(f"Błąd Tikrow na stronie {page} ({target_date}): {response.status_code}", flush=True)
+                    continue
                 
                 token_dead_notified = False
                 jobs = response.json()
-                data = jobs.get('_embedded', {}).get('commissions', [])
+                
+                try: data = jobs['_embedded']['commissions']
+                except KeyError: break 
                 
                 if not data: break 
                 
-                all_available_now.extend([j for j in data if not j.get('taken')])
+                available_on_page = [job for job in data if job.get('taken') is False]
+                all_available_now.extend(available_on_page)
                 
-                # Bezpieczne 0,6s z lekkim rozrzutem (jitter)
+                # Szybsza asymetryczna pauza zamiast twardego 1.0s
                 time.sleep(random.uniform(0.55, 0.65))
                 
             except Exception as e:
-                print(f"Błąd sieciowy: {e}", flush=True)
+                print(f"Błąd pobierania strony {page} ({target_date}): {e}", flush=True)
                 break
                 
     unique_jobs = {job['id']: job for job in all_available_now}.values()
-    duration = round(time.time() - start_time, 1)
-    warsaw_now = datetime.now(warsaw_tz).strftime('%H:%M:%S')
+    warsaw_time = datetime.now(warsaw_tz).strftime('%H:%M:%S')
     
-    print(f"[{warsaw_now}] Tryb: {mode_label} | Czas: {duration}s | Znaleziono: {len(unique_jobs)}", flush=True)
+    print(f"[{warsaw_time}] Przeskanowałem lokalnie {len(unique_jobs)} unikalnych, wolnych zleceń z obszaru 30 km ({mode_label}).", flush=True)
     
     for job in unique_jobs:
         job_id = job.get('id')
+        city = job.get('customer_city', '')
         address = job.get('customer_address', '')
-        if any(target in str(address).lower() for target in TARGET_ADDRESSES):
+        
+        print(f"   -> Radar wykrył: {city}, {address}", flush=True)
+        
+        address_lower = str(address).lower()
+        is_interesting = any(target in address_lower for target in TARGET_ADDRESSES)
+        
+        if is_interesting:
             if job_id not in seen_jobs:
                 seen_jobs.add(job_id)
-                company = job.get('customer', 'Firma')
-                rate = job.get('rate_total', '?')
-                start_ts = job.get('start_date')
-                dt = datetime.fromtimestamp(start_ts, warsaw_tz)
-                job_date = dt.strftime('%d.%m (%a), %H:%M')
+                
+                company = job.get('customer', 'Nieznana firma')
+                position = job.get('position', 'Praca')
+                start_date_ts = job.get('start_date')
+                
+                if start_date_ts:
+                    dt = datetime.fromtimestamp(start_date_ts, ZoneInfo("Europe/Warsaw"))
+                    dni_tygodnia = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
+                    dzien_tygodnia = dni_tygodnia[dt.weekday()]
+                    job_date = dt.strftime(f'%d.%m.%Y ({dzien_tygodnia}), godz. %H:%M')
+                else:
+                    job_date = 'Brak danych'
                 
                 job_url = f"https://partner.tikrow.com/user-commissions/{job_id}/details"
-                msg = f"🚨 *RADAR WYKRYŁ:* {company}\n📅 {job_date}\n📍 {address}\n💰 {rate} PLN\n\n🔗 [REZERWUJ TUTAJ]({job_url})"
+                
+                # ZMIANA: Czysty format powiadomienia zgodnie z wytycznymi
+                msg = f"🏢 *Firma:* {company}\n📅 *Kiedy:* {job_date}\n📍 *Adres:* {address}\n💼 *Stanowisko:* {position}\n\n🔗 [Kliknij tutaj, aby otworzyć zlecenie]({job_url})"
+                
                 send_telegram_message(msg)
+                print(f"Wysłano powiadomienie: {company} - {address} ({job_date})", flush=True)
 
 keep_alive()
+print("Uruchamiam bota (Matryca 3:1, promień 30km)...", flush=True)
+
 while True:
     warsaw_time = datetime.now(ZoneInfo("Europe/Warsaw"))
-    if 0 <= warsaw_time.hour < 6:
+    current_hour = warsaw_time.hour
+
+    if 0 <= current_hour < 6:
+        print(f"[{warsaw_time.strftime('%H:%M:%S')}] Przerwa nocna.", flush=True)
         time.sleep(300)
         continue
 
     check_jobs()
-    # Mała pauza między rundami
-    time.sleep(random.randint(3, 5))
+    wait_time = random.randint(3, 6)
+    print(f"Czekam {wait_time} sekund do następnego sprawdzenia...", flush=True)
+    time.sleep(wait_time)
