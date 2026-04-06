@@ -12,6 +12,8 @@ import threading
 # ==========================================
 TELEGRAM_TOKEN = "8603328307:AAGCdHPSlh-a39UzYiQTKwE4UTMUxACBTsw"
 MY_CHAT_ID = "6327998362"
+
+# Twój nowy, zaktualizowany token
 BEARER_TOKEN = "6a31ad15947306ca97601ddef5913326de268e51"
 
 LAT = 53.379360370518434
@@ -30,7 +32,7 @@ DNI_PL = {
 # --- SERWER DLA CHMURY (RENDER/RAILWAY) ---
 app = Flask('')
 @app.route('/')
-def home(): return "Szybki Bot Tikrow (Hybrydowy Filtr) działa!"
+def home(): return "Szybki Bot Tikrow (Hybrydowy Filtr + Logi) działa!"
 def run(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 def keep_alive(): threading.Thread(target=run, daemon=True).start()
 
@@ -72,7 +74,7 @@ def check_offers():
         res = scraper.get(API_URL, headers=headers, timeout=15)
         
         if res.status_code == 401:
-            print(f"[{datetime.now(warsaw_tz).strftime('%H:%M:%S')}] 🔑 Token wygasł!")
+            print(f"[{datetime.now(warsaw_tz).strftime('%H:%M:%S')}] 🔑 Błąd 401: Token wygasł!")
             return
             
         if res.status_code != 200:
@@ -82,9 +84,12 @@ def check_offers():
         items = data.get("_embedded", {}).get("commissions", [])
         
         count_new = 0
+        count_ignored = 0
+        
         for item in items:
             oid = item.get("id")
             
+            # Reagujemy tylko na całkowicie nowe ID, którego bot jeszcze nie widział w pamięci
             if oid and oid not in seen_ids:
                 seen_ids.add(oid)
                 
@@ -98,9 +103,7 @@ def check_offers():
                 norm_city = normalize_text(city)
                 norm_pos = normalize_text(position)
                 
-                # ==========================================
-                # BRAMKI LOGICZNE (NOWY FILTR)
-                # ==========================================
+                # BRAMKI LOGICZNE (FILTR)
                 is_walecznych = "walecznych 64" in norm_addr
                 is_szczecin = "szczecin" in norm_city
                 is_kasy = "kasy samoobslugowe" in norm_pos
@@ -127,19 +130,23 @@ def check_offers():
                            f"🔗 [SZCZEGÓŁY]({job_url})")
                     
                     send_msg(msg)
+                    print(f"✅ [ZGODNOŚĆ] Wysłano na Telegram: {position} | {city}, {address}")
+                else:
+                    # Zlecenie jest nowe, ale nie pasuje do naszych filtrów
+                    count_ignored += 1
+                    print(f"❌ [ODRZUCONO] Wykryto: {position} | {city}, {address} (Nie pasuje do filtra)")
 
+        # Podsumowanie cyklu, jeśli cokolwiek nowego wpadło na radar
         now_str = datetime.now(warsaw_tz).strftime('%H:%M:%S')
-        if count_new > 0:
-            print(f"[{now_str}] 🚀 Wysłano {count_new} ofert (Filtr: Walecznych / Kasy)!")
-        else:
-            print(f"[{now_str}] 🆗 System OK. Sprawdzono {len(items)} ofert z okolicy.")
+        if count_new > 0 or count_ignored > 0:
+            print(f"[{now_str}] 📊 Podsumowanie radaru: Wysłano: {count_new} | Zignorowano: {count_ignored}")
                 
     except Exception as e:
-        print(f"[{datetime.now(warsaw_tz).strftime('%H:%M:%S')}] ⚠️ Błąd: {e}")
+        print(f"[{datetime.now(warsaw_tz).strftime('%H:%M:%S')}] ⚠️ Błąd krytyczny skanera: {e}")
 
 # --- START ---
 if __name__ == "__main__":
-    print("🚀 TIKROW BOT (Hybrydowy Filtr Stanowisk) - URUCHOMIONY")
+    print("🚀 TIKROW BOT (Hybrydowy Filtr + Logi Analityczne) - URUCHOMIONY")
     keep_alive()
     
     while True:
